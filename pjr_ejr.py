@@ -89,10 +89,6 @@ def check_pjr(approvals: Dict[str, Set[str]], committee: Set[str], num_voters: i
 def check_ejr(approvals: Dict[str, Set[str]], committee: Set[str], num_voters: int, committee_size: int) -> bool:
     """
     Check if a committee satisfies Extended Justified Representation (EJR).
-    
-    EJR is like PJR but handles overlapping groups more carefully.
-    A group deserves i representatives if they can be partitioned into i disjoint 
-    subgroups each of size at least quota.
     """
     quota = num_voters / committee_size
     voters = list(approvals.keys())
@@ -125,7 +121,6 @@ def can_partition_into_cohesive_subgroups(voters: Tuple[str], approvals: Dict[st
                                         num_subgroups: int, quota: float) -> bool:
     """
     Helper function to check if voters can be partitioned into cohesive subgroups.
-    This is a simplified version - a full implementation would be more complex.
     """
     if len(voters) < num_subgroups * quota:
         return False
