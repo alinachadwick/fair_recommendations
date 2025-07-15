@@ -121,25 +121,76 @@ def can_partition_into_cohesive_subgroups(voters: Tuple[str], approvals: Dict[st
                                         num_subgroups: int, quota: float) -> bool:
     """
     Helper function to check if voters can be partitioned into cohesive subgroups.
+    
+    A cohesive subgroup is a set of voters who all approve at least one common candidate.
+    We need to partition the voters into num_subgroups disjoint subgroups, each of size >= quota.
     """
     if len(voters) < num_subgroups * quota:
         return False
     
-    # Find candidates that have enough support within this group
-    candidate_supporters = {}
-    for voter in voters:
-        for candidate in approvals[voter]:
-            if candidate not in candidate_supporters:
-                candidate_supporters[candidate] = []
-            candidate_supporters[candidate].append(voter)
+    min_subgroup_size = int(quota)
+    voters_list = list(voters)
     
-    # Count how many candidates have at least quota supporters
-    viable_candidates = 0
-    for candidate, supporters in candidate_supporters.items():
-        if len(supporters) >= quota:
-            viable_candidates += 1
+    # Try to find a valid partition using backtracking
+    return _find_partition_recursive(voters_list, approvals, num_subgroups, min_subgroup_size, [], 0)
+
+
+def _find_partition_recursive(remaining_voters: List[str], approvals: Dict[str, Set[str]], 
+                            subgroups_needed: int, min_size: int, 
+                            current_partition: List[List[str]], start_idx: int) -> bool:
+    """
+    Recursive helper to find a valid partition using backtracking.
     
-    return viable_candidates >= num_subgroups
+    Args:
+        remaining_voters: List of voters not yet assigned to subgroups
+        approvals: Voter approval mappings
+        subgroups_needed: Number of subgroups still needed
+        min_size: Minimum size for each subgroup
+        current_partition: Current partial partition being built
+        start_idx: Starting index for generating combinations (to avoid duplicates)
+    """
+    # Base case: if we've found all needed subgroups
+    if subgroups_needed == 0:
+        return len(remaining_voters) == 0  # All voters should be assigned
+    
+    # If not enough voters left to form remaining subgroups
+    if len(remaining_voters) < subgroups_needed * min_size:
+        return False
+    
+    # Try different subgroup sizes (from min_size up to what's reasonable)
+    max_reasonable_size = len(remaining_voters) - (subgroups_needed - 1) * min_size
+    
+    # Generate all possible subgroups of valid size
+    for size in range(min_size, max_reasonable_size + 1):
+        # Try all combinations of 'size' voters from remaining_voters
+        for subgroup in itertools.combinations(remaining_voters, size):
+            # Check if this subgroup is cohesive (has common approvals)
+            if _is_cohesive_subgroup(subgroup, approvals):
+                # Create new remaining voters list without this subgroup
+                new_remaining = [v for v in remaining_voters if v not in subgroup]
+                
+                # Recursively try to partition the remaining voters
+                new_partition = current_partition + [list(subgroup)]
+                if _find_partition_recursive(new_remaining, approvals, subgroups_needed - 1, 
+                                           min_size, new_partition, 0):
+                    return True
+    
+    return False
+
+
+def _is_cohesive_subgroup(voters: Tuple[str], approvals: Dict[str, Set[str]]) -> bool:
+    """
+    Check if a group of voters is cohesive (they have at least one commonly approved candidate).
+    """
+    if not voters:
+        return False
+    
+    # Find intersection of all voters' approvals
+    common_approvals = approvals[voters[0]].copy()
+    for voter in voters[1:]:
+        common_approvals &= approvals[voter]
+    
+    return len(common_approvals) > 0
 
 
 def find_committees_satisfying_criterion(approvals: Dict[str, Set[str]], committee_size: int, 
