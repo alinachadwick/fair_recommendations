@@ -6,6 +6,8 @@ import random
 # input: preferences = {u1: [a1, a2, a3], u2: [a6, a7, a1], ...}
 # output: ranking over alternatives that satisfies Prefix-JR if it exists
 
+# input: preferences = {u1: [a1, a2, a3], u2: [a6, a7, a1], ...}, given level k
+# output: approval sets where key = user, value = list of approved alternatives
 def get_approval_sets(preferences, k):
     approval_sets = {} # key = user, value = list of approved alternatives
     for user in preferences:
@@ -14,7 +16,8 @@ def get_approval_sets(preferences, k):
         approval_sets[user] = approval_set
     return approval_sets
 
-
+# input: preferences = {u1: [a1, a2, a3], u2: [a6, a7, a1], ...}, given level k
+# output: cohesive groups (list of cohesive sets of voters), list of alternatives, approval sets where key = user, value = list of approved alternatives
 def find_cohesive_groups(preferences, k):
     cohesive_groups = [] # list of cohesive sets
     approval_sets = get_approval_sets(preferences, k)
@@ -41,6 +44,8 @@ def find_cohesive_groups(preferences, k):
     return cohesive_groups, alternatives, approval_sets
 
 
+# input: preferences = {u1: [a1, a2, a3], u2: [a6, a7, a1], ...}, given level k
+# output: set of alternatives that are valid to satisfy JR for a given level k
 def satisfies_jr(preferences, k):
     alts_to_explore = set()
     cohesive_groups, alternatives, approval_sets = find_cohesive_groups(preferences, k)
@@ -59,6 +64,8 @@ def satisfies_jr(preferences, k):
     return alts_to_explore
         
 
+# input: partial ranking (the ranking derived from level k - 1), remaining alts (all alts not in partial ranking), preferences = {u1: [a1, a2, a3], u2: [a6, a7, a1], ...}
+# output: all rankings that satisfy prefix-JR
 def branch_all(partial_ranking, remaining_alts, preferences):
     k = len(partial_ranking) + 1
 
@@ -77,6 +84,8 @@ def branch_all(partial_ranking, remaining_alts, preferences):
     
     return all_rankings
 
+#input: preferences (same as above)
+#output: all rankings that satisfy prefix-JR
 def find_all_prefix_jr_rankings(preferences):
     all_alts = set(alt for ranking in preferences.values() for alt in ranking)
     return branch_all([], all_alts, preferences)
