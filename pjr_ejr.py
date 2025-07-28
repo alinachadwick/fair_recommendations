@@ -100,19 +100,15 @@ def check_ejr(approvals: Dict[str, Set[str]], committee: Set[str], num_voters: i
             for voter_group in itertools.combinations(voters, group_size):
                 # Check if this group can be partitioned into i cohesive subgroups
                 if can_partition_into_cohesive_subgroups(voter_group, approvals, i, quota):
-                    # Find common approvals of this group
+                    # Find union of all approvals in this group
                     group_approvals = set()
                     for voter in voter_group:
-                        if not group_approvals:
-                            group_approvals = approvals[voter].copy()
-                        else:
-                            group_approvals &= approvals[voter]
+                        group_approvals.update(approvals[voter])
                     
-                    # If they have common approvals, check representation
-                    if group_approvals:
-                        representation_count = len(group_approvals & committee)
-                        if representation_count < i:
-                            return False
+                    # Check representation among their approved candidates
+                    representation_count = len(group_approvals & committee)
+                    if representation_count < i:
+                        return False
     
     return True
 
@@ -243,6 +239,182 @@ def generate_example_approvals() -> Dict[str, Set[str]]:
     }
 
 
+def debug_partition_example():
+    """
+    Example showing how the partition checking works step by step.
+    """
+    print("\n=== EJR Partition Example ===")
+    
+    # Simple example: 4 voters, want to partition into 2 subgroups of size 2 each
+    approvals = {
+        'v1': {'a', 'b'},      # v1 approves a, b
+        'v2': {'a', 'c'},      # v2 approves a, c  
+        'v3': {'b', 'd'},      # v3 approves b, d
+        'v4': {'c', 'd'}       # v4 approves c, d
+    }
+    
+    voters = ('v1', 'v2', 'v3', 'v4')
+    num_subgroups = 2
+    quota = 2.0
+    
+    print("Voters and their approvals:")
+    for voter, approved in approvals.items():
+        print(f"  {voter}: {sorted(approved)}")
+    
+    print(f"\nTrying to partition {voters} into {num_subgroups} subgroups of size >= {quota}")
+    
+    # Show what cohesive subgroups are possible
+    print("\nChecking all possible subgroups of size 2:")
+    import itertools
+    for subgroup in itertools.combinations(voters, 2):
+        is_cohesive = _is_cohesive_subgroup(subgroup, approvals)
+        if is_cohesive:
+            # Find common approvals
+            common = approvals[subgroup[0]] & approvals[subgroup[1]]
+            print(f"  {subgroup}: COHESIVE - common approvals: {sorted(common)}")
+        else:
+            print(f"  {subgroup}: NOT cohesive - no common approvals")
+    
+    # Now show the actual partition attempt
+    print(f"\nAttempting to find valid partition...")
+    result = can_partition_into_cohesive_subgroups(voters, approvals, num_subgroups, quota)
+    print(f"Can partition: {result}")
+    
+    # Show why it fails (if it does)
+    print(f"\nWhy this example fails:")
+    print(f"  - Cohesive pairs: (v1,v2) share 'a', (v3,v4) share 'd'")
+    print(f"  - But we need to use ALL 4 voters in 2 disjoint subgroups")
+    print(f"  - Possible partitions: {{{{v1,v2}}, {{v3,v4}}}} or {{{{v1,v3}}, {{v2,v4}}}} or {{{{v1,v4}}, {{v2,v3}}}}")
+    print(f"  - Only {{{{v1,v2}}, {{v3,v4}}}} uses cohesive pairs")
+    print(f"  - This SHOULD work! Let me check why it doesn't...")
+
+
+def debug_partition_success_example():
+    """
+    Example that should successfully partition.
+    """
+    print("\n=== EJR Partition Success Example ===")
+    
+    # Example that should work: clear disjoint cohesive groups
+    approvals = {
+        'v1': {'a', 'b'},      # Group 1: both approve 'a'
+        'v2': {'a', 'c'},      
+        'v3': {'d', 'e'},      # Group 2: both approve 'd' 
+        'v4': {'d', 'f'}       
+    }
+    
+    voters = ('v1', 'v2', 'v3', 'v4')
+    num_subgroups = 2
+    quota = 2.0
+    
+    print("Voters and their approvals:")
+    for voter, approved in approvals.items():
+        print(f"  {voter}: {sorted(approved)}")
+    
+    print(f"\nTrying to partition {voters} into {num_subgroups} subgroups of size >= {quota}")
+    
+    print("\nCohesive subgroups of size 2:")
+    for subgroup in itertools.combinations(voters, 2):
+        is_cohesive = _is_cohesive_subgroup(subgroup, approvals)
+        if is_cohesive:
+            common = approvals[subgroup[0]] & approvals[subgroup[1]]
+            print(f"  {subgroup}: COHESIVE - common: {sorted(common)}")
+    
+    result = can_partition_into_cohesive_subgroups(voters, approvals, num_subgroups, quota)
+    print(f"\nCan partition: {result}")
+    print(f"Expected partition: {{v1,v2}} (share 'a') and {{v3,v4}} (share 'd')")
+
+
+def analyze_original_example():
+    """
+    Analyze the original example to see if any committee should satisfy EJR.
+    """
+    print("\n=== Analyzing Original Example for EJR ===")
+    
+    approvals = generate_example_approvals()
+    committee_size = 3
+    num_voters = len(approvals)
+    quota = num_voters / committee_size  # 6/3 = 2
+    
+    print("Original approvals:")
+    for voter, approved in approvals.items():
+        print(f"  {voter}: {sorted(approved)}")
+    print(f"Quota: {quota}")
+    
+    # Let's check a specific committee that satisfies PJR
+    test_committee = {'a', 'b', 'd'}
+    print(f"\nAnalyzing committee {sorted(test_committee)}:")
+    
+    # Check what groups could claim representation
+    print("\nPossible groups that could claim representatives:")
+    
+    # Groups of size >= 2*quota = 4 (should get 2 reps)
+    voters = list(approvals.keys())
+    print(f"\nGroups of size 4 (should get 2 reps):")
+    
+    import itertools
+    for group in itertools.combinations(voters, 4):
+        # Find common approvals
+        common_approvals = approvals[group[0]].copy()
+        for voter in group[1:]:
+            common_approvals &= approvals[voter]
+        
+        if common_approvals:
+            reps_in_committee = len(common_approvals & test_committee)
+            print(f"  Group {group}: common={sorted(common_approvals)}, reps_in_committee={reps_in_committee}")
+            
+            # Check if this group can be partitioned into 2 cohesive subgroups
+            can_partition = can_partition_into_cohesive_subgroups(group, approvals, 2, quota)
+            print(f"    Can partition into 2 cohesive subgroups: {can_partition}")
+    
+    # Groups of size >= 3*quota = 6 (should get 3 reps)
+    print(f"\nGroups of size 6 (should get 3 reps):")
+    all_voters = tuple(voters)
+    common_all = approvals[voters[0]].copy()
+    for voter in voters[1:]:
+        common_all &= approvals[voter]
+    
+    if common_all:
+        reps_in_committee = len(common_all & test_committee)
+        print(f"  All voters: common={sorted(common_all)}, reps_in_committee={reps_in_committee}")
+        can_partition = can_partition_into_cohesive_subgroups(all_voters, approvals, 3, quota)
+        print(f"    Can partition into 3 cohesive subgroups: {can_partition}")
+    else:
+        print(f"  All voters have no common approvals")
+
+
+def check_simple_ejr_case():
+    """
+    Check a very simple case that should definitely satisfy EJR.
+    """
+    print("\n=== Simple EJR Case ===")
+    
+    # Very simple case: 3 clear groups
+    simple_approvals = {
+        'v1': {'a'},
+        'v2': {'a'}, 
+        'v3': {'b'},
+        'v4': {'b'},
+        'v5': {'c'},
+        'v6': {'c'}
+    }
+    
+    committee_size = 3
+    committee = {'a', 'b', 'c'}
+    
+    print("Simple approvals:")
+    for voter, approved in simple_approvals.items():
+        print(f"  {voter}: {sorted(approved)}")
+    
+    print(f"Committee: {sorted(committee)}")
+    
+    ejr_result = check_ejr(simple_approvals, committee, 6, committee_size)
+    print(f"EJR satisfied: {ejr_result}")
+    
+    if not ejr_result:
+        print("This should definitely satisfy EJR - there might be a bug!")
+
+
 def main():
     """Example usage of the PJR and EJR implementations."""
     print("=== PJR and EJR Implementation ===\n")
@@ -283,6 +455,12 @@ def main():
     print(f"  JR satisfied: {jr_result}")
     print(f"  PJR satisfied: {pjr_result}")
     print(f"  EJR satisfied: {ejr_result}")
+    
+    # Run debug examples
+    debug_partition_example()
+    debug_partition_success_example()
+    analyze_original_example()
+    check_simple_ejr_case()
 
 
 if __name__ == "__main__":
