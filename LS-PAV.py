@@ -43,7 +43,7 @@ def profitable_deviation(committee_1, committee_2, preferences, epsilon):
     else:
         return False
     
-print(profitable_deviation([4,3,2], [1,5,6], preferences, 0))
+# print(profitable_deviation([4,3,2], [1,5,6], preferences, 0))
 
 def find_better_commitee(initial_commitee, preferences, candidates, epsilon):
 
@@ -67,7 +67,7 @@ def find_better_commitee(initial_commitee, preferences, candidates, epsilon):
     
     return initial_commitee
     
-print(find_better_commitee([2,6,1], preferences, candidates, 0.5))
+# print(find_better_commitee([2,6,1], preferences, candidates, 0.5))
     
 
 def LS_PAV(candidates, preferences, committee_size):

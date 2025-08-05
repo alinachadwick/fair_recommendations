@@ -1,467 +1,250 @@
-# PJR and EJR Implementation
-# Proportional Justified Representation and Extended Justified Representation
+from itertools import combinations
+from typing import List, Set, Tuple, Dict
+from collections import defaultdict
 
-import itertools
-from typing import Dict, List, Set, Tuple
-
-def check_jr(approvals: Dict[str, Set[str]], committee: Set[str], num_voters: int, committee_size: int) -> bool:
+def precompute_voter_groups(voters: List[Set[int]], n: int, k: int) -> Dict[Tuple[int, int], List[Tuple]]:
     """
-    Check if a committee satisfies Justified Representation (JR).
-    
-    Args:
-        approvals: Dict mapping voter_id -> set of approved candidates
-        committee: Set of selected candidates
-        num_voters: Total number of voters
-        committee_size: Size of the committee
+    Precompute relevant voter groups and their common candidates.
     
     Returns:
-        True if JR is satisfied, False otherwise
+        Dictionary mapping (ell, group_size) to list of (voter_indices, common_candidates)
     """
-    quota = num_voters / committee_size
+    voter_groups = defaultdict(list)
     
-    # Find all cohesive groups
-    candidates = set()
-    for voter_approvals in approvals.values():
-        candidates.update(voter_approvals)
-    
-    for candidate in candidates:
-        # Find voters who approve this candidate
-        supporters = set()
-        for voter, voter_approvals in approvals.items():
-            if candidate in voter_approvals:
-                supporters.add(voter)
+    for ell in range(1, k + 1):
+        quota = (ell * n) // k
         
-        # If this candidate has enough supporters to form a cohesive group
-        if len(supporters) >= quota:
-            # Check if any of their approved candidates are in the committee
-            group_approvals = set()
-            for voter in supporters:
-                group_approvals.update(approvals[voter])
-            
-            if not (group_approvals & committee):
-                return False  # This cohesive group has no representation
-    
-    return True
-
-
-def check_pjr(approvals: Dict[str, Set[str]], committee: Set[str], num_voters: int, committee_size: int) -> bool:
-    """
-    Check if a committee satisfies Proportional Justified Representation (PJR).
-    
-    PJR requires that every group of i*quota voters gets at least i representatives.
-    """
-    quota = num_voters / committee_size
-    
-    # Find all possible cohesive groups
-    candidates = set()
-    for voter_approvals in approvals.values():
-        candidates.update(voter_approvals)
-    
-    # Check all possible subsets of voters to find cohesive groups
-    voters = list(approvals.keys())
-    
-    for i in range(1, committee_size + 1):
-        min_group_size = i * quota
-        
-        # Find cohesive groups of size at least min_group_size
-        for candidate in candidates:
-            supporters = []
-            for voter in voters:
-                if candidate in approvals[voter]:
-                    supporters.append(voter)
-            
-            if len(supporters) >= min_group_size:
-                # This is a cohesive group that deserves i representatives
-                # Find the union of all their approvals
-                group_approvals = set()
-                for voter in supporters:
-                    group_approvals.update(approvals[voter])
+        for group_size in range(quota, n + 1):
+            for voter_indices in combinations(range(n), group_size):
+                # Find common candidates
+                common_candidates = set.intersection(*[voters[i] for i in voter_indices])
                 
-                # Count how many of their approved candidates are in committee
-                representation_count = len(group_approvals & committee)
-                
-                if representation_count < i:
-                    return False
+                # Only store groups that have at least ell common candidates
+                if len(common_candidates) >= ell:
+                    voter_groups[(ell, group_size)].append((voter_indices, common_candidates))
     
-    return True
+    return voter_groups
 
-
-def check_ejr(approvals: Dict[str, Set[str]], committee: Set[str], num_voters: int, committee_size: int) -> bool:
+def check_pjr_optimized(committee: Set[int], voter_groups: Dict[Tuple[int, int], List[Tuple]], n: int, k: int) -> bool:
     """
-    Check if a committee satisfies Extended Justified Representation (EJR).
+    Check if a committee satisfies PJR using precomputed voter groups.
     """
-    quota = num_voters / committee_size
-    voters = list(approvals.keys())
-    
-    # For each possible number of deserved representatives
-    for i in range(1, committee_size + 1):
-        # Check all possible groups of voters
-        for group_size in range(int(i * quota), num_voters + 1):
-            for voter_group in itertools.combinations(voters, group_size):
-                # Check if this group can be partitioned into i cohesive subgroups
-                if can_partition_into_cohesive_subgroups(voter_group, approvals, i, quota):
-                    # Find union of all approvals in this group
-                    group_approvals = set()
-                    for voter in voter_group:
-                        group_approvals.update(approvals[voter])
-                    
-                    # Check representation among their approved candidates
-                    representation_count = len(group_approvals & committee)
-                    if representation_count < i:
+    for ell in range(1, k + 1):
+        quota = (ell * n) // k
+        for group_size in range(quota, n + 1):
+            key = (ell, group_size)
+            if key in voter_groups:
+                for voter_indices, common_candidates in voter_groups[key]:
+                    # Check if committee contains at least ell of the common candidates
+                    if len(common_candidates.intersection(committee)) < ell:
                         return False
-    
     return True
 
-
-def can_partition_into_cohesive_subgroups(voters: Tuple[str], approvals: Dict[str, Set[str]], 
-                                        num_subgroups: int, quota: float) -> bool:
+def find_pjr_committees_optimized(voters: List[Set[int]], k: int, candidates: Set[int] = None) -> List[Set[int]]:
     """
-    Helper function to check if voters can be partitioned into cohesive subgroups.
-    
-    A cohesive subgroup is a set of voters who all approve at least one common candidate.
-    We need to partition the voters into num_subgroups disjoint subgroups, each of size >= quota.
+    Optimized version of PJR committee finding.
     """
-    if len(voters) < num_subgroups * quota:
-        return False
+    # Extract all candidates if not provided
+    if candidates is None:
+        candidates = set()
+        for voter_prefs in voters:
+            candidates.update(voter_prefs)
     
-    min_subgroup_size = int(quota)
-    voters_list = list(voters)
+    n = len(voters)
     
-    # Try to find a valid partition using backtracking
-    return _find_partition_recursive(voters_list, approvals, num_subgroups, min_subgroup_size, [], 0)
-
-
-def _find_partition_recursive(remaining_voters: List[str], approvals: Dict[str, Set[str]], 
-                            subgroups_needed: int, min_size: int, 
-                            current_partition: List[List[str]], start_idx: int) -> bool:
-    """
-    Recursive helper to find a valid partition using backtracking.
+    # Optimization 1: Precompute voter groups and their common candidates
+    voter_groups = precompute_voter_groups(voters, n, k)
     
-    Args:
-        remaining_voters: List of voters not yet assigned to subgroups
-        approvals: Voter approval mappings
-        subgroups_needed: Number of subgroups still needed
-        min_size: Minimum size for each subgroup
-        current_partition: Current partial partition being built
-        start_idx: Starting index for generating combinations (to avoid duplicates)
-    """
-    # Base case: if we've found all needed subgroups
-    if subgroups_needed == 0:
-        return len(remaining_voters) == 0  # All voters should be assigned
+    # Optimization 2: Early termination - if no valid groups exist, all committees are PJR
+    if not any(voter_groups.values()):
+        return [set(committee) for committee in combinations(candidates, k)]
     
-    # If not enough voters left to form remaining subgroups
-    if len(remaining_voters) < subgroups_needed * min_size:
-        return False
+    # Optimization 3: Candidate filtering - only consider candidates that appear in voter preferences
+    relevant_candidates = set()
+    for voter_prefs in voters:
+        relevant_candidates.update(voter_prefs)
+    candidates = candidates.intersection(relevant_candidates)
     
-    # Try different subgroup sizes (from min_size up to what's reasonable)
-    max_reasonable_size = len(remaining_voters) - (subgroups_needed - 1) * min_size
+    pjr_committees = []
     
-    # Generate all possible subgroups of valid size
-    for size in range(min_size, max_reasonable_size + 1):
-        # Try all combinations of 'size' voters from remaining_voters
-        for subgroup in itertools.combinations(remaining_voters, size):
-            # Check if this subgroup is cohesive (has common approvals)
-            if _is_cohesive_subgroup(subgroup, approvals):
-                # Create new remaining voters list without this subgroup
-                new_remaining = [v for v in remaining_voters if v not in subgroup]
-                
-                # Recursively try to partition the remaining voters
-                new_partition = current_partition + [list(subgroup)]
-                if _find_partition_recursive(new_remaining, approvals, subgroups_needed - 1, 
-                                           min_size, new_partition, 0):
-                    return True
-    
-    return False
-
-
-def _is_cohesive_subgroup(voters: Tuple[str], approvals: Dict[str, Set[str]]) -> bool:
-    """
-    Check if a group of voters is cohesive (they have at least one commonly approved candidate).
-    """
-    if not voters:
-        return False
-    
-    # Find intersection of all voters' approvals
-    common_approvals = approvals[voters[0]].copy()
-    for voter in voters[1:]:
-        common_approvals &= approvals[voter]
-    
-    return len(common_approvals) > 0
-
-
-def find_committees_satisfying_criterion(approvals: Dict[str, Set[str]], committee_size: int, 
-                                       criterion: str = "jr") -> List[Set[str]]:
-    """
-    Find all committees of given size that satisfy the specified criterion.
-    
-    Args:
-        approvals: Dict mapping voter_id -> set of approved candidates
-        committee_size: Size of committee to select
-        criterion: "jr", "pjr", or "ejr"
-    
-    Returns:
-        List of committees (sets of candidates) satisfying the criterion
-    """
-    # Get all candidates
-    candidates = set()
-    for voter_approvals in approvals.values():
-        candidates.update(voter_approvals)
-    
-    num_voters = len(approvals)
-    valid_committees = []
-    
-    # Check all possible committees
-    for committee in itertools.combinations(candidates, committee_size):
+    # Try all possible committees
+    for committee in combinations(candidates, k):
         committee_set = set(committee)
+        if check_pjr_optimized(committee_set, voter_groups, n, k):
+            pjr_committees.append(committee_set)
+    
+    return pjr_committees
+
+def find_pjr_committees_with_pruning(voters: List[Set[int]], k: int, candidates: Set[int] = None) -> List[Set[int]]:
+    """
+    Version with additional pruning strategies.
+    """
+    if candidates is None:
+        candidates = set()
+        for voter_prefs in voters:
+            candidates.update(voter_prefs)
+    
+    n = len(voters)
+    
+    # Calculate candidate support (how many voters approve each candidate)
+    candidate_support = defaultdict(int)
+    for voter_prefs in voters:
+        for candidate in voter_prefs:
+            candidate_support[candidate] += 1
+    
+    # Sort candidates by support (heuristic: popular candidates more likely to be in PJR committees)
+    sorted_candidates = sorted(candidates, key=lambda c: candidate_support[c], reverse=True)
+    
+    # Precompute critical voter groups
+    critical_groups = []
+    for ell in range(1, k + 1):
+        quota = (ell * n) // k
         
-        if criterion == "jr":
-            if check_jr(approvals, committee_set, num_voters, committee_size):
-                valid_committees.append(committee_set)
-        elif criterion == "pjr":
-            if check_pjr(approvals, committee_set, num_voters, committee_size):
-                valid_committees.append(committee_set)
-        elif criterion == "ejr":
-            if check_ejr(approvals, committee_set, num_voters, committee_size):
-                valid_committees.append(committee_set)
+        # Find minimal voter groups that could violate PJR
+        for group_size in range(quota, min(quota + k, n + 1)):  # Limit search space
+            for voter_indices in combinations(range(n), group_size):
+                common_candidates = set.intersection(*[voters[i] for i in voter_indices])
+                if len(common_candidates) >= ell:
+                    critical_groups.append((ell, voter_indices, common_candidates))
     
-    return valid_committees
-
-
-def generate_example_approvals() -> Dict[str, Set[str]]:
-    """Generate an example approval voting scenario."""
-    return {
-        'v1': {'a', 'b', 'c'},
-        'v2': {'a', 'b', 'd'},
-        'v3': {'a', 'c', 'd'},
-        'v4': {'b', 'c', 'e'},
-        'v5': {'d', 'e', 'f'},
-        'v6': {'d', 'e', 'f'},
-    }
-
-
-def debug_partition_example():
-    """
-    Example showing how the partition checking works step by step.
-    """
-    print("\n=== EJR Partition Example ===")
+    pjr_committees = []
     
-    # Simple example: 4 voters, want to partition into 2 subgroups of size 2 each
-    approvals = {
-        'v1': {'a', 'b'},      # v1 approves a, b
-        'v2': {'a', 'c'},      # v2 approves a, c  
-        'v3': {'b', 'd'},      # v3 approves b, d
-        'v4': {'c', 'd'}       # v4 approves c, d
-    }
-    
-    voters = ('v1', 'v2', 'v3', 'v4')
-    num_subgroups = 2
-    quota = 2.0
-    
-    print("Voters and their approvals:")
-    for voter, approved in approvals.items():
-        print(f"  {voter}: {sorted(approved)}")
-    
-    print(f"\nTrying to partition {voters} into {num_subgroups} subgroups of size >= {quota}")
-    
-    # Show what cohesive subgroups are possible
-    print("\nChecking all possible subgroups of size 2:")
-    import itertools
-    for subgroup in itertools.combinations(voters, 2):
-        is_cohesive = _is_cohesive_subgroup(subgroup, approvals)
-        if is_cohesive:
-            # Find common approvals
-            common = approvals[subgroup[0]] & approvals[subgroup[1]]
-            print(f"  {subgroup}: COHESIVE - common approvals: {sorted(common)}")
-        else:
-            print(f"  {subgroup}: NOT cohesive - no common approvals")
-    
-    # Now show the actual partition attempt
-    print(f"\nAttempting to find valid partition...")
-    result = can_partition_into_cohesive_subgroups(voters, approvals, num_subgroups, quota)
-    print(f"Can partition: {result}")
-    
-    # Show why it fails (if it does)
-    print(f"\nWhy this example fails:")
-    print(f"  - Cohesive pairs: (v1,v2) share 'a', (v3,v4) share 'd'")
-    print(f"  - But we need to use ALL 4 voters in 2 disjoint subgroups")
-    print(f"  - Possible partitions: {{{{v1,v2}}, {{v3,v4}}}} or {{{{v1,v3}}, {{v2,v4}}}} or {{{{v1,v4}}, {{v2,v3}}}}")
-    print(f"  - Only {{{{v1,v2}}, {{v3,v4}}}} uses cohesive pairs")
-    print(f"  - This SHOULD work! Let me check why it doesn't...")
-
-
-def debug_partition_success_example():
-    """
-    Example that should successfully partition.
-    """
-    print("\n=== EJR Partition Success Example ===")
-    
-    # Example that should work: clear disjoint cohesive groups
-    approvals = {
-        'v1': {'a', 'b'},      # Group 1: both approve 'a'
-        'v2': {'a', 'c'},      
-        'v3': {'d', 'e'},      # Group 2: both approve 'd' 
-        'v4': {'d', 'f'}       
-    }
-    
-    voters = ('v1', 'v2', 'v3', 'v4')
-    num_subgroups = 2
-    quota = 2.0
-    
-    print("Voters and their approvals:")
-    for voter, approved in approvals.items():
-        print(f"  {voter}: {sorted(approved)}")
-    
-    print(f"\nTrying to partition {voters} into {num_subgroups} subgroups of size >= {quota}")
-    
-    print("\nCohesive subgroups of size 2:")
-    for subgroup in itertools.combinations(voters, 2):
-        is_cohesive = _is_cohesive_subgroup(subgroup, approvals)
-        if is_cohesive:
-            common = approvals[subgroup[0]] & approvals[subgroup[1]]
-            print(f"  {subgroup}: COHESIVE - common: {sorted(common)}")
-    
-    result = can_partition_into_cohesive_subgroups(voters, approvals, num_subgroups, quota)
-    print(f"\nCan partition: {result}")
-    print(f"Expected partition: {{v1,v2}} (share 'a') and {{v3,v4}} (share 'd')")
-
-
-def analyze_original_example():
-    """
-    Analyze the original example to see if any committee should satisfy EJR.
-    """
-    print("\n=== Analyzing Original Example for EJR ===")
-    
-    approvals = generate_example_approvals()
-    committee_size = 3
-    num_voters = len(approvals)
-    quota = num_voters / committee_size  # 6/3 = 2
-    
-    print("Original approvals:")
-    for voter, approved in approvals.items():
-        print(f"  {voter}: {sorted(approved)}")
-    print(f"Quota: {quota}")
-    
-    # Let's check a specific committee that satisfies PJR
-    test_committee = {'a', 'b', 'd'}
-    print(f"\nAnalyzing committee {sorted(test_committee)}:")
-    
-    # Check what groups could claim representation
-    print("\nPossible groups that could claim representatives:")
-    
-    # Groups of size >= 2*quota = 4 (should get 2 reps)
-    voters = list(approvals.keys())
-    print(f"\nGroups of size 4 (should get 2 reps):")
-    
-    import itertools
-    for group in itertools.combinations(voters, 4):
-        # Find common approvals
-        common_approvals = approvals[group[0]].copy()
-        for voter in group[1:]:
-            common_approvals &= approvals[voter]
-        
-        if common_approvals:
-            reps_in_committee = len(common_approvals & test_committee)
-            print(f"  Group {group}: common={sorted(common_approvals)}, reps_in_committee={reps_in_committee}")
+    # Generate committees with pruning
+    def is_valid_partial(partial_committee: Set[int], remaining_slots: int) -> bool:
+        """Check if a partial committee can possibly lead to a PJR committee."""
+        for ell, voter_indices, common_candidates in critical_groups:
+            current_intersection = len(common_candidates.intersection(partial_committee))
+            remaining_candidates = common_candidates - partial_committee
             
-            # Check if this group can be partitioned into 2 cohesive subgroups
-            can_partition = can_partition_into_cohesive_subgroups(group, approvals, 2, quota)
-            print(f"    Can partition into 2 cohesive subgroups: {can_partition}")
+            # If we can't possibly get enough representatives even with remaining slots
+            if current_intersection + min(remaining_slots, len(remaining_candidates)) < ell:
+                return False
+        return True
     
-    # Groups of size >= 3*quota = 6 (should get 3 reps)
-    print(f"\nGroups of size 6 (should get 3 reps):")
-    all_voters = tuple(voters)
-    common_all = approvals[voters[0]].copy()
-    for voter in voters[1:]:
-        common_all &= approvals[voter]
-    
-    if common_all:
-        reps_in_committee = len(common_all & test_committee)
-        print(f"  All voters: common={sorted(common_all)}, reps_in_committee={reps_in_committee}")
-        can_partition = can_partition_into_cohesive_subgroups(all_voters, approvals, 3, quota)
-        print(f"    Can partition into 3 cohesive subgroups: {can_partition}")
-    else:
-        print(f"  All voters have no common approvals")
-
-
-def check_simple_ejr_case():
-    """
-    Check a very simple case that should definitely satisfy EJR.
-    """
-    print("\n=== Simple EJR Case ===")
-    
-    # Very simple case: 3 clear groups
-    simple_approvals = {
-        'v1': {'a'},
-        'v2': {'a'}, 
-        'v3': {'b'},
-        'v4': {'b'},
-        'v5': {'c'},
-        'v6': {'c'}
-    }
-    
-    committee_size = 3
-    committee = {'a', 'b', 'c'}
-    
-    print("Simple approvals:")
-    for voter, approved in simple_approvals.items():
-        print(f"  {voter}: {sorted(approved)}")
-    
-    print(f"Committee: {sorted(committee)}")
-    
-    ejr_result = check_ejr(simple_approvals, committee, 6, committee_size)
-    print(f"EJR satisfied: {ejr_result}")
-    
-    if not ejr_result:
-        print("This should definitely satisfy EJR - there might be a bug!")
-
-
-def main():
-    """Example usage of the PJR and EJR implementations."""
-    print("=== PJR and EJR Implementation ===\n")
-    
-    # Generate example data
-    approvals = generate_example_approvals()
-    committee_size = 3
-    
-    print("Voter Approvals:")
-    for voter, approved in approvals.items():
-        print(f"  {voter}: {sorted(approved)}")
-    print(f"\nCommittee size: {committee_size}")
-    print(f"Number of voters: {len(approvals)}")
-    print(f"Quota (n/k): {len(approvals)/committee_size:.2f}")
-    
-    # Find committees satisfying each criterion
-    print("\n" + "="*50)
-    
-    for criterion in ["jr", "pjr", "ejr"]:
-        print(f"\nCommittees satisfying {criterion.upper()}:")
-        committees = find_committees_satisfying_criterion(approvals, committee_size, criterion)
+    # Build committees incrementally with pruning
+    def build_committee(current: Set[int], remaining: List[int], needed: int):
+        if needed == 0:
+            if check_pjr_from_critical_groups(current):
+                pjr_committees.append(current.copy())
+            return
         
-        if committees:
-            for i, committee in enumerate(committees, 1):
-                print(f"  {i}. {sorted(committee)}")
-        else:
-            print("  None found!")
+        if not remaining or not is_valid_partial(current, needed):
+            return
+        
+        # Try including the next candidate
+        candidate = remaining[0]
+        current.add(candidate)
+        build_committee(current, remaining[1:], needed - 1)
+        current.remove(candidate)
+        
+        # Try excluding the next candidate
+        build_committee(current, remaining[1:], needed)
     
-    # Test a specific committee
-    print("\n" + "="*50)
-    test_committee = {'a', 'b', 'd'}
-    print(f"\nTesting committee {sorted(test_committee)}:")
+    def check_pjr_from_critical_groups(committee: Set[int]) -> bool:
+        """Check PJR using only critical groups."""
+        for ell, voter_indices, common_candidates in critical_groups:
+            if len(common_candidates.intersection(committee)) < ell:
+                return False
+        return True
     
-    jr_result = check_jr(approvals, test_committee, len(approvals), committee_size)
-    pjr_result = check_pjr(approvals, test_committee, len(approvals), committee_size)
-    ejr_result = check_ejr(approvals, test_committee, len(approvals), committee_size)
+    build_committee(set(), sorted_candidates, k)
     
-    print(f"  JR satisfied: {jr_result}")
-    print(f"  PJR satisfied: {pjr_result}")
-    print(f"  EJR satisfied: {ejr_result}")
-    
-    # Run debug examples
-    debug_partition_example()
-    debug_partition_success_example()
-    analyze_original_example()
-    check_simple_ejr_case()
+    return pjr_committees
 
-
+# Example usage with timing
 if __name__ == "__main__":
-    main() 
+    import time
+    
+    # Add the original brute force function for comparison
+    def check_pjr(voters: List[Set[int]], committee: Set[int], k: int) -> bool:
+        n = len(voters)
+        for ell in range(1, k + 1):
+            quota = (ell * n) // k
+            for group_size in range(quota, n + 1):
+                for voter_group in combinations(range(n), group_size):
+                    common_candidates = set.intersection(*[voters[i] for i in voter_group])
+                    if len(common_candidates) >= ell:
+                        if len(common_candidates.intersection(committee)) < ell:
+                            return False
+        return True
+    
+    def find_pjr_committees_brute_force(voters: List[Set[int]], k: int, candidates: Set[int] = None) -> List[Set[int]]:
+        if candidates is None:
+            candidates = set()
+            for voter_prefs in voters:
+                candidates.update(voter_prefs)
+        pjr_committees = []
+        for committee in combinations(candidates, k):
+            committee_set = set(committee)
+            if check_pjr(voters, committee_set, k):
+                pjr_committees.append(committee_set)
+        return pjr_committees
+    
+    # Test example
+    voters = [
+        {0, 5, 2, 6, 1, 7},
+        {0, 3, 2, 9, 8 , 10},
+        {0, 1, 3, 4, 2, 10},
+        {3, 4, 6, 8, 5, 7},
+        {3, 2, 5, 1, 0, 4},
+        {3, 0, 4, 7, 1, 2}
+    ]
+
+    voters_2 = [
+        # Group 1: Voters who like candidates 0,1,2 (minority coalition)
+        {0, 1, 2},
+        {0, 1, 2}, 
+        {0, 1, 2},
+        {0, 1},    # Partial overlap
+        
+        # Group 2: Voters who like candidates 3,4,5 (another minority)
+        {3, 4, 5},
+        {3, 4, 5},
+        {3, 4},
+        
+        # Group 3: Voters who like candidates 6,7,8
+        {6, 7, 8},
+        {6, 7, 8},
+        {6, 7},
+        
+        # Individual voters with specific preferences
+        {9, 10},
+        {11, 12},
+        {13, 14},
+        {15, 16},
+        {17, 18, 19}  # Last voter likes high-numbered candidates
+    ]
+
+    k = 5
+    
+    # Time the original version
+    start = time.time()
+    original_result = find_pjr_committees_brute_force(voters, k)
+    original_time = time.time() - start
+    
+    # Time the optimized version
+    start = time.time()
+    optimized_result = find_pjr_committees_optimized(voters, k)
+    optimized_time = time.time() - start
+    
+    # Time the pruning version
+    start = time.time()
+    pruning_result = find_pjr_committees_with_pruning(voters, k)
+    pruning_time = time.time() - start
+    
+    print(f"Original version: {len(original_result)} committees in {original_time:.4f}s")
+    print(f"Optimized version: {len(optimized_result)} committees in {optimized_time:.4f}s")
+    print(f"Pruning version: {len(pruning_result)} committees in {pruning_time:.4f}s")
+    
+    if original_time > 0:
+        print(f"Speedup: {original_time/optimized_time:.2f}x (optimized), {original_time/pruning_time:.2f}x (pruning)")
+    
+    # Verify results are the same
+    original_sorted = set(map(tuple, map(sorted, original_result)))
+    optimized_sorted = set(map(tuple, map(sorted, optimized_result)))
+    print(f"\nResults match: {original_sorted == optimized_sorted}")
+    
+    # Show the committees
+    print("\nPJR Committees found:")
+    for committee in sorted(optimized_result):
+        print(f"  {sorted(committee)}")
